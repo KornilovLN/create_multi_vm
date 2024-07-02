@@ -1,1 +1,5 @@
 info/
+vm1/disk_vm1.vdi
+vm2/disk_vm2.vdi
+vm1/.vagrant/
+vm2/.vagrant/
