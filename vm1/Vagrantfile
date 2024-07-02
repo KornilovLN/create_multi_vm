@@ -1,0 +1,82 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+    config.vm.box = "bento/ubuntu-20.04"
+    config.vm.boot_timeout = 600 # Увеличиваем время ожидания загрузки до 10 минут
+  
+    # Первая виртуальная машина ---------------------------------------------
+    # config.vm.define "vm1", autostart: true do |vm1|
+    config.vm.define "vm1" do |vm1|
+      vm1.vm.hostname = "vm1"
+      vm1.vm.network "private_network", ip: "192.168.56.10"
+      vm1.vm.synced_folder "/home/leon/virt/create_multi_vm/shared_folder/", "/shared_folder"  
+
+      # Копирование sender.py в домашнюю директорию vm1
+      vm1.vm.provision "file", source: "sender.py", destination: "~/sender.py"
+
+      vm1.vm.provision "shell", privileged: false, inline: <<-SHELL
+        echo 'vagrant:vagrant' | sudo chpasswd
+      SHELL
+
+      # Настройка провайдера виртуальной машины (VirtualBox)
+      vm1.vm.provider :virtualbox do |vb|
+            vb.name = "vm1"
+            vb.memory = 4096
+            vb.cpus = 1
+
+            # Проверяем, существует ли диск disk_vm1.vdi
+            unless File.exist?("disk_vm1.vdi")
+              # Если диск не существует, создаем его
+              vb.customize ["createhd", "--filename", "disk_vm1.vdi", "--size", 10 * 1024]
+            end
+
+            vb.customize ["storageattach", :id, "--storagectl", "SATA Controller", "--port", 1, "--device", 0, "--type", "hdd", "--medium", "disk_vm1.vdi"]    
+      end
+
+      # Провижнинг (настройка) виртуальной машины через shell скрипт
+      vm1.vm.provision "shell", inline: <<-SHELL
+            apt-get update
+            apt install -y curl python3
+            bash -c "echo '172.16.0.1 sdn.dc.cns.atom registry.dc.cns.atom' >> /etc/hosts"
+            bash -c "cd /vagrant/;./net-install.sh setup"
+            apt-get update
+            apt-get install -y docker.io git
+
+            # Добавляем текущего пользователя в группу docker
+            # и перезагружаем сессию текущего пользователя
+            sudo usermod -aG docker ${USER}            
+            #su - ${USER}
+
+            # Устанавливаем права доступа к Docker сокету
+            sudo chmod 666 /var/run/docker.sock
+
+            # Перезагружаем службу Docker
+            sudo systemctl restart docker
+
+            # Обновляем группы для текущего пользователя
+            newgrp docker
+
+            mkdir -p /home/vagrant/.config/systemd/user
+            cat << EOF > /home/vagrant/.config/systemd/user/sender.service
+
+        [Unit]
+        Description=Sender Python Script
+        After=network.target
+
+        [Service]
+        ExecStart=/usr/bin/python3 /home/vagrant/sender.py
+        Restart=always
+
+        [Install]
+        WantedBy=default.target
+        EOF
+
+            sudo loginctl enable-linger vagrant
+            sudo systemctl --user import-environment DISPLAY XAUTHORITY
+            systemctl --user enable sender.service
+            systemctl --user start sender.service
+        SHELL
+    end # --------------------------------------------------------------------
+
+  end

@@ -1,0 +1,1 @@
+{"virtualbox":{"/shared_folder":{"guestpath":"/shared_folder","hostpath":"/home/leon/virt/create_multi_vm/shared_folder","disabled":false,"__vagrantfile":true},"/vagrant":{"guestpath":"/vagrant","hostpath":"/home/leon/virt/create_multi_vm/vm1","disabled":false,"__vagrantfile":true}}}

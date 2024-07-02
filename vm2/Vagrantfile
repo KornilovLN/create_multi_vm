@@ -1,0 +1,102 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+'''
+Использует базовый образ bento/ubuntu-20.04 для создания виртуальной машины.
+Устанавливает время ожидания загрузки виртуальной машины (boot_timeout) в 600 секунд (10 минут).
+Определяет виртуальную машину с именем vm2.
+Задает имя хоста (hostname) для vm2 как vm2.
+Настраивает приватную сеть для vm2 с IP-адресом 192.168.56.11.
+Монтирует папку ../shared_folder (относительно расположения Vagrantfile) как /shared_folder внутри виртуальной машины.
+Копирует файл receiver.py из текущей директории в домашнюю директорию виртуальной машины (~/receiver.py).
+Настраивает провайдер VirtualBox для vm2 с 4096 МБ оперативной памяти, 1 ЦПУ и виртуальным диском disk_vm2.vdi размером 10 ГБ.
+Выполняет shell-скрипт для настройки виртуальной машины после ее создания, включая установку curl, python3, docker.io, git и добавление записей в /etc/hosts.
+'''
+
+Vagrant.configure("2") do |config|
+    config.vm.box = "bento/ubuntu-20.04"
+    config.vm.boot_timeout = 600 # Увеличиваем время ожидания загрузки до 10 минут
+  
+    # Первая виртуальная машина ---------------------------------------------
+    # # config.vm.define "vm2", autostart: true do |vm2|
+    config.vm.define "vm2" do |vm2|
+      vm2.vm.hostname = "vm2"
+      vm2.vm.network "private_network", ip: "192.168.56.11"
+      vm2.vm.synced_folder "/home/leon/virt/create_multi_vm/shared_folder/", "/shared_folder" 
+
+      # Копирование sender.py в домашнюю директорию vm1
+      vm2.vm.provision "file", source: "receiver.py", destination: "~/receiver.py"
+
+      vm2.vm.provision "shell", privileged: false, inline: <<-SHELL
+        echo 'vagrant:vagrant' | sudo chpasswd
+      SHELL
+
+      # Настройка провайдера виртуальной машины (VirtualBox)
+      vm2.vm.provider :virtualbox do |vb|
+            vb.name = "vm2"
+            vb.memory = 4096
+            vb.cpus = 1
+            # Проверяем, существует ли диск disk_vm2.vdi
+            unless File.exist?("disk_vm2.vdi")
+              # Если диск не существует, создаем его
+              vb.customize ["createhd", "--filename", "disk_vm2.vdi", "--size", 10 * 1024]
+            end
+
+            vb.customize ["storageattach", :id, "--storagectl", "SATA Controller", "--port", 1, "--device", 0, "--type", "hdd", "--medium", "disk_vm2.vdi"]    
+      end
+
+      # Провижнинг (настройка) виртуальной машины через shell скрипт
+      vm2.vm.provision "shell", inline: <<-SHELL
+            apt-get update
+            apt install -y curl python3
+            bash -c "echo '172.16.0.1 sdn.dc.cns.atom registry.dc.cns.atom' >> /etc/hosts"
+            bash -c "cd /vagrant/;./net-install.sh setup"
+            apt-get update
+            apt-get install -y docker.io git
+
+            #------------------------------------------
+            # Добавляем текущего пользователя в группу docker
+            # и перезагружаем сессию текущего пользователя
+            sudo usermod -aG docker ${USER}            
+            #su - ${USER}
+
+            # Устанавливаем права доступа к Docker сокету
+            sudo chmod 666 /var/run/docker.sock
+
+            # Перезагружаем службу Docker
+            sudo systemctl restart docker
+
+            # Обновляем группы для текущего пользователя
+            newgrp docker
+
+           
+            #------------------------------------------
+            # Создаем systemd user unit для receiver.py
+            mkdir -p /home/vagrant/.config/systemd/user
+            cat << EOF > /home/vagrant/.config/systemd/user/receiver.service
+
+        [Unit]
+        Description=Receiver Python Script
+        After=network.target
+
+        [Service]
+        ExecStart=/usr/bin/python3 /home/vagrant/receiver.py
+        Restart=always
+
+        [Install]
+        WantedBy=default.target
+        EOF
+
+          # Включаем и запускаем сервис
+          sudo loginctl enable-linger vagrant
+          sudo systemctl --user import-environment DISPLAY XAUTHORITY
+          systemctl --user enable receiver.service
+          systemctl --user start receiver.service
+          #------------------------------------------
+          
+          python3 receiver.py  
+  
+        SHELL
+    end # --------------------------------------------------------------------
+
+  end
