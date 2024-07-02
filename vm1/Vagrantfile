@@ -76,6 +76,8 @@ Vagrant.configure("2") do |config|
             sudo systemctl --user import-environment DISPLAY XAUTHORITY
             systemctl --user enable sender.service
             systemctl --user start sender.service
+
+            python3 sender.py 
         SHELL
     end # --------------------------------------------------------------------
 
